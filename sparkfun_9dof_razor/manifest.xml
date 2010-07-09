@@ -1,0 +1,17 @@
+<package>
+  <description brief="sparkfun_9dof_razor">
+
+     sparkfun_9dof_razor
+
+  </description>
+  <author>Eric Perko</author>
+  <license>BSD</license>
+  <review status="unreviewed" notes=""/>
+  <url>http://ros.org/wiki/sparkfun_9dof_razor</url>
+  <depend package="roscpp"/>
+  <depend package="rospy"/>
+  <depend package="sensor_msgs"/>
+
+</package>
+
+
