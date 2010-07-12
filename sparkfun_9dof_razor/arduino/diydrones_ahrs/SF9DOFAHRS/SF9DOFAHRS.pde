@@ -35,7 +35,7 @@
 // ADXL345 Sensitivity(from datasheet) => 4mg/LSB   1G => 1000mg/4mg = 256 steps
 // Tested value : 248
 #define GRAVITY 248  //this equivalent to 1G in the raw data coming from the accelerometer 
-#define Accel_Scale(x) x*(GRAVITY/9.81)//Scaling the raw data of the accel to actual acceleration in meters for seconds square
+#define Accel_Scale(x) x*(GRAVITY/9.81)//Scaling the raw data of the accel to actual acceleration in meters per seconds squared
 
 #define ToRad(x) (x*0.01745329252)  // *pi/180
 #define ToDeg(x) (x*57.2957795131)  // *180/pi
@@ -304,7 +304,7 @@ ISR(ADC_vect)
 
 // Local magnetic declination
 // I use this web : http://www.ngdc.noaa.gov/geomagmodels/Declination.jsp
-#define MAGNETIC_DECLINATION -6.0    // not used now -> magnetic bearing
+#define MAGNETIC_DECLINATION -8.25    // not used now -> magnetic bearing
 
 void Compass_Heading()
 {
