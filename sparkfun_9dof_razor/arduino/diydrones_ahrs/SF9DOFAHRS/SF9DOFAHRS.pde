@@ -43,9 +43,9 @@
 
 // LPR530 & LY530 Sensitivity (from datasheet) => (3.3mv at 3v)at 3.3v: 3mV/º/s, 3.22mV/ADC step => 0.93
 // Tested values : 0.92
-#define Gyro_Gain_X 0.92 //X axis Gyro gain
-#define Gyro_Gain_Y 0.92 //Y axis Gyro gain
-#define Gyro_Gain_Z 0.92 //Z axis Gyro gain
+#define Gyro_Gain_X 1.086956 //X axis Gyro gain (1/above value) (units of step/degree/s)
+#define Gyro_Gain_Y 1.086956 //Y axis Gyro gain
+#define Gyro_Gain_Z 1.086956 //Z axis Gyro gain
 #define Gyro_Scaled_X(x) x*ToRad(Gyro_Gain_X) //Return the scaled ADC raw data of the gyro in radians for second
 #define Gyro_Scaled_Y(x) x*ToRad(Gyro_Gain_Y) //Return the scaled ADC raw data of the gyro in radians for second
 #define Gyro_Scaled_Z(x) x*ToRad(Gyro_Gain_Z) //Return the scaled ADC raw data of the gyro in radians for second
@@ -60,9 +60,8 @@
 //OUTPUTMODE=0 will print uncorrected data of the gyros (with drift)
 #define OUTPUTMODE 1
 
-//#define PRINT_DCM 0     //Will print the whole direction cosine matrix
 #define PRINT_ANALOGS 0 //Will print the analog raw data
-#define PRINT_EULER 0   //Will print the Euler angles Roll, Pitch and Yaw
+#define PRINT_IMU 1   //Will output the IMU data
 
 #define ADC_WARM_CYCLES 50
 #define STATUS_LED 13 
@@ -102,7 +101,6 @@ float yaw;
 float errorRollPitch[3]= {0,0,0}; 
 float errorYaw[3]= {0,0,0};
 
-unsigned int counter=0;
 byte gyro_sat=0;
 
 float DCM_Matrix[3][3]= {
@@ -133,7 +131,7 @@ volatile uint8_t analog_count[8];
 
 void setup()
 { 
-  Serial.begin(57600);
+  Serial.begin(115200);
   pinMode (STATUS_LED,OUTPUT);  // Status LED
   
   Analog_Reference(DEFAULT); 
@@ -142,7 +140,7 @@ void setup()
   Accel_Init();
   Read_Accel();
 
-  Serial.println("Sparkfun 9DOF Razor AHRS");
+  Serial.println("Sparkfun 9DOF Razor IMU v0.1a");
 
   digitalWrite(STATUS_LED,LOW);
   delay(1500);
@@ -178,19 +176,21 @@ void setup()
   Read_adc_raw();     // ADC initialization
   timer=millis();
   delay(20);
-  counter=0;
 }
 
 void loop() //Main Loop
 {
+  Serial.println(millis() - timer);
   if((millis()-timer)>=20)  // Main loop runs at 50Hz
   {
     timer_old = timer;
     timer=millis();
-    if (timer>timer_old)
+    if (timer>timer_old) {
       G_Dt = (timer-timer_old)/1000.0;    // Real time of loop run. We use this on the DCM algorithm (gyro integration time)
-    else
+    }
+    else {
       G_Dt = 0;
+    }
     
     // *** DCM algorithm
     // Data adquisition
@@ -209,7 +209,7 @@ void loop() //Main Loop
     CalcVelocities();
     CalcAccelerations();
    
-    //printdata();
+    printdata();
     
     //Turn off the LED when you saturate any of the gyros.
     if((abs(Gyro_Vector[0])>=ToRad(300))||(abs(Gyro_Vector[1])>=ToRad(300))||(abs(Gyro_Vector[2])>=ToRad(300)))
@@ -242,4 +242,7 @@ void CalcVelocities() {
 }
 
 void CalcAccelerations() {
+  Accel_Vector[0]=Accel_Scale(accel_x); //accel in +x direction
+  Accel_Vector[1]=Accel_Scale(accel_y); //accel in +y direction
+  Accel_Vector[2]=Accel_Scale(accel_z); //accel in +z direction
 }
