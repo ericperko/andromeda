@@ -29,14 +29,14 @@
         Programmer : 3.3v FTDI
         Arduino IDE : Select board  "Arduino Duemilanove w/ATmega328"
 */
-// This code works also on ATMega168 Hardware
 
 #include <Wire.h>
 
 // ADXL345 Sensitivity(from datasheet) => 4mg/LSB   1G => 1000mg/4mg = 256 steps
 // Tested value : 248
 #define GRAVITY 248  //this equivalent to 1G in the raw data coming from the accelerometer 
-#define Accel_Scale(x) x*(GRAVITY/9.81)//Scaling the raw data of the accel to actual acceleration in meters for seconds square
+#define Accel_Scale_old(x) x*(GRAVITY/9.81)//Scaling the raw data of the accel to actual acceleration in meters for seconds square
+#define Accel_Scale(x) x*(9.81/GRAVITY)//Scaling the raw data of the accel to actual acceleration in meters for seconds square
 
 #define ToRad(x) (x*0.01745329252)  // *pi/180
 #define ToDeg(x) (x*57.2957795131)  // *180/pi
@@ -198,14 +198,16 @@ void loop() //Main Loop
     Read_Accel();     // Read I2C accelerometer
     
     Read_Compass();    // Read I2C magnetometer
-    Compass_Heading(); // Calculate magnetic heading  
-    
+    //Compass_Heading(); // Calculate magnetic heading  
     // Calculations...
-    Matrix_update(); 
-    Normalize();
-    Drift_correction();
-    Euler_angles();
+//    Matrix_update(); 
+//    Normalize();
+//    Drift_correction();
+//    Euler_angles();
     // ***
+    CalcOrientation();
+    CalcVelocities();
+    CalcAccelerations();
    
     //printdata();
     
@@ -228,4 +230,16 @@ void loop() //Main Loop
   
   }
    
+}
+
+void CalcOrientation() {
+}
+
+void CalcVelocities() {
+  Gyro_Vector[0]=Gyro_Scaled_X(read_adc(0)); //gyro x roll
+  Gyro_Vector[1]=Gyro_Scaled_Y(read_adc(1)); //gyro y pitch
+  Gyro_Vector[2]=Gyro_Scaled_Z(read_adc(2)); //gyro Z yaw
+}
+
+void CalcAccelerations() {
 }
