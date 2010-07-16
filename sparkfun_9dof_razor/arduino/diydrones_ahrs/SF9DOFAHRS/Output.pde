@@ -1,7 +1,7 @@
 
 void printdata(void)
 {    
-      Serial.print("!");
+      //Serial.print("!");
 
       #if PRINT_EULER == 1
       Serial.print("ANG:");

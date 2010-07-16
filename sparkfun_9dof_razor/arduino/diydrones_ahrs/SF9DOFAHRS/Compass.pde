@@ -22,4 +22,6 @@ void Compass_Heading()
   MAG_Y = magnetom_y*cos_roll-magnetom_z*sin_roll;
   // Magnetic Heading
   MAG_Heading = atan2(-MAG_Y,MAG_X);
+  Serial.print(MAG_Heading);
+  Serial.println();
 }

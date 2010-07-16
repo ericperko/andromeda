@@ -69,16 +69,17 @@ void Read_Accel()
 
 void Compass_Init()
 {
-	Wire.beginTransmission(CompassAddress);
-	Wire.send(0x02); 
-	Wire.send(0x00);   // Set continouos mode (default to 10Hz)
-	Wire.endTransmission(); //end transmission
-
+  
 	//Setup the 50Hz update rate
 	Wire.beginTransmission(CompassAddress);
 	Wire.send(0x00);
 	Wire.send(0x18);
 	Wire.endTransmission();
+  
+	Wire.beginTransmission(CompassAddress);
+	Wire.send(0x02); 
+	Wire.send(0x00);   // Set continouos mode (default to 10Hz)
+	Wire.endTransmission(); //end transmission
 
 }
 

@@ -62,7 +62,7 @@
 
 //#define PRINT_DCM 0     //Will print the whole direction cosine matrix
 #define PRINT_ANALOGS 0 //Will print the analog raw data
-#define PRINT_EULER 1   //Will print the Euler angles Roll, Pitch and Yaw
+#define PRINT_EULER 0   //Will print the Euler angles Roll, Pitch and Yaw
 
 #define ADC_WARM_CYCLES 50
 #define STATUS_LED 13 
@@ -185,7 +185,6 @@ void loop() //Main Loop
 {
   if((millis()-timer)>=20)  // Main loop runs at 50Hz
   {
-    counter++;
     timer_old = timer;
     timer=millis();
     if (timer>timer_old)
@@ -198,12 +197,8 @@ void loop() //Main Loop
     Read_adc_raw();   // This read gyro data
     Read_Accel();     // Read I2C accelerometer
     
-    if (counter > 5)  // Read compass data at 10Hz... (5 loop runs)
-      {
-      counter=0;
-      Read_Compass();    // Read I2C magnetometer
-      Compass_Heading(); // Calculate magnetic heading  
-      }
+    Read_Compass();    // Read I2C magnetometer
+    Compass_Heading(); // Calculate magnetic heading  
     
     // Calculations...
     Matrix_update(); 
@@ -212,7 +207,7 @@ void loop() //Main Loop
     Euler_angles();
     // ***
    
-    printdata();
+    //printdata();
     
     //Turn off the LED when you saturate any of the gyros.
     if((abs(Gyro_Vector[0])>=ToRad(300))||(abs(Gyro_Vector[1])>=ToRad(300))||(abs(Gyro_Vector[2])>=ToRad(300)))
