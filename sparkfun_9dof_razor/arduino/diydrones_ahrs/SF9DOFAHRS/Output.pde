@@ -4,6 +4,12 @@ void printdata(void)
 
       #if PRINT_IMU == 1
       Serial.print("IMU:");
+      Serial.print(Magneto_Vector[0]);
+      Serial.print(",");
+      Serial.print(Magneto_Vector[1]);
+      Serial.print(",");
+      Serial.print(Magneto_Vector[2]);
+      Serial.print(",");
       Serial.print(Gyro_Vector[0]);
       Serial.print(",");
       Serial.print(Gyro_Vector[1]);

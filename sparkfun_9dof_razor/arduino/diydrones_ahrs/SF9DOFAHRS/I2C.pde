@@ -78,7 +78,7 @@ void Compass_Init()
   
 	Wire.beginTransmission(CompassAddress);
 	Wire.send(0x02); 
-	Wire.send(0x00);   // Set continouos mode (default to 10Hz)
+	Wire.send(0x00);   // Set continouos mode
 	Wire.endTransmission(); //end transmission
 
 }

@@ -50,6 +50,8 @@
 #define Gyro_Scaled_Y(x) x*ToRad(Gyro_Gain_Y) //Return the scaled ADC raw data of the gyro in radians for second
 #define Gyro_Scaled_Z(x) x*ToRad(Gyro_Gain_Z) //Return the scaled ADC raw data of the gyro in radians for second
 
+#define Compass_Scaled(x) x*(0.000769230769) //Scaling the raw magnetometer values to Gauss. According to the spec sheet, at default resolution there are 1300 counts per Gauss
+
 #define Kp_ROLLPITCH 0.02
 #define Ki_ROLLPITCH 0.00002
 #define Kp_YAW 1.2
@@ -88,6 +90,7 @@ float MAG_Heading;
 
 float Accel_Vector[3]= {0,0,0}; //Store the acceleration in a vector
 float Gyro_Vector[3]= {0,0,0};//Store the gyros turn rate in a vector
+float Magneto_Vector[3] = {0,0,0}; //Store the magentometer readings in a vector
 float Omega_Vector[3]= {0,0,0}; //Corrected Gyro_Vector data
 float Omega_P[3]= {0,0,0};//Omega Proportional correction
 float Omega_I[3]= {0,0,0};//Omega Integrator
@@ -140,7 +143,7 @@ void setup()
   Accel_Init();
   Read_Accel();
 
-  Serial.println("Sparkfun 9DOF Razor IMU v0.1a");
+  Serial.println("Sparkfun 9DOF Razor IMU v0.1b");
 
   digitalWrite(STATUS_LED,LOW);
   delay(1500);
@@ -180,7 +183,7 @@ void setup()
 
 void loop() //Main Loop
 {
-  Serial.println(millis() - timer);
+  //Serial.println(millis() - timer);
   if((millis()-timer)>=20)  // Main loop runs at 50Hz
   {
     timer_old = timer;
@@ -205,7 +208,7 @@ void loop() //Main Loop
 //    Drift_correction();
 //    Euler_angles();
     // ***
-    CalcOrientation();
+    CalcMagnetometer();
     CalcVelocities();
     CalcAccelerations();
    
@@ -232,13 +235,16 @@ void loop() //Main Loop
    
 }
 
-void CalcOrientation() {
+void CalcMagnetometer() {
+  Magneto_Vector[0] = Compass_Scaled(magnetom_x);
+  Magneto_Vector[1] = Compass_Scaled(magnetom_y);
+  Magneto_Vector[2] = Compass_Scaled(magnetom_z);
 }
 
 void CalcVelocities() {
   Gyro_Vector[0]=Gyro_Scaled_X(read_adc(0)); //gyro x roll
   Gyro_Vector[1]=Gyro_Scaled_Y(read_adc(1)); //gyro y pitch
-  Gyro_Vector[2]=Gyro_Scaled_Z(read_adc(2)); //gyro Z yaw
+  Gyro_Vector[2]=Gyro_Scaled_Z(read_adc(2)); //gyro z yaw
 }
 
 void CalcAccelerations() {
