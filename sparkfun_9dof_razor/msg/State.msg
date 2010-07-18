@@ -11,7 +11,10 @@
 Header header
 
 geometry_msgs/Vector3 magnetometer
+float64 mag_error
 
 geometry_msgs/Vector3 angular_velocity 
+float64 omega_error
 
 geometry_msgs/Vector3 linear_acceleration
+float64 accel_error

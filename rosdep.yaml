@@ -1,0 +1,4 @@
+#rosdeps for andromeda
+
+python-serial:
+    ubuntu: python-serial
