@@ -38,6 +38,10 @@ class SF9DOF_UKF:
         self.kalman_state[3,0] = 1.0
         self.is_initialized = True
 
+    @staticmethod
+    def prediction(current_state, dt, controls = None):
+        pass
+
     def handle_measurement(self, measurement):
         if not self.is_initialized:
             rospy.logwarn("Filter is unintialized. Discarding measurement")
