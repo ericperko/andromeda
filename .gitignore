@@ -1,0 +1,6 @@
+build/
+msg_gen/
+bin/
+*.pyc
+*.pyo
+*.swp

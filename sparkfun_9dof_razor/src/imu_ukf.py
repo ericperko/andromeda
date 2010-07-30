@@ -6,6 +6,7 @@ import rospy
 
 from sparkfun_9dof_razor.msg import State
 from sensor_msgs.msg import Imu
+import tf.transformations as tf_math
 
 from numpy import *
 import numpy.linalg
@@ -35,18 +36,31 @@ class SF9DOF_UKF:
         self.time = rospy.Time.now()
         self.kalman_state = zeros((self.n,1))
         self.kalman_covariance = diag(ones(self.kalman_state.shape[0]))
-        self.kalman_state[3,0] = 1.0
+        self.kalman_state[0:4,0] = tf_math.quaternion_from_euler(0,0,0,'sxyz')
         self.is_initialized = True
 
     @staticmethod
     def prediction(current_state, dt, controls = None):
-        pass
+        #Pass the gyro and accelerations straight through
+        predicted_state = current_state.copy()
+        #Generate the quaternion for the rotation given by the gyros
+        angles = current_state[4:7,0] * dt
+        quat = tf_math.quaternion_from_euler(*angles, axes='sxyz')
+        #Rotate the previous orientation by this new amount
+        new_angle = tf_math.quaternion_multiply(quat, current_state[0:4,0])
+        predicted_state[0:4,0] = new_angle
+        #Return a prediction
+        return predicted_state
 
     def handle_measurement(self, measurement):
         if not self.is_initialized:
             rospy.logwarn("Filter is unintialized. Discarding measurement")
         else:
-            pass
+            sigmas = generate_sigma_points(self.kalman_state,
+                    self.kalman_covariance)
+            dt = (measurement.header.stamp - self.time).to_sec()
+            transformed_sigmas = [prediction(sigma, dt) for sigma in sigmas]
+
 
     def generate_sigma_points(self, mean, covariance):
         sigmas = []
