@@ -55,7 +55,7 @@ class SF9DOF_UKF:
         full_quat[0:3,0] = quat
         full_quat[3,0] = sqrt(1 - dot(quat, quat))
         if not alltrue(isreal(full_quat)):
-            #Should find a better exception class for this
+            #TODO Should find a better exception class for this
             raise Exception("Quat not completely real... this is troubling")
         new_quat = dot(omega_mat, full_quat)
         new_quat = tf_math.unit_vector(new_quat)
@@ -75,6 +75,14 @@ class SF9DOF_UKF:
         return predicted_state
 
     @staticmethod
+    def recover_quat(mean):
+        quat_temp = zeros((4,1))
+        quat_vec = mean[0:3,0]
+        quat_temp[0:3,0] = quat_vec
+        quat_temp[3,0] = 1. - tf_math.vector_norm(quat_vec)
+        return quat_temp
+
+    @staticmethod
     def process_noise(current_state, dt, controls = None):
         return diag(ones(current_state.shape[0]) * 0.1)
 
@@ -82,9 +90,40 @@ class SF9DOF_UKF:
         pass
 
     def estimate_mean(self, transformed_sigmas):
+        quat_sum = zeros((4,1))
         est_mean = zeros(self.kalman_state.shape)
+        #Compute estimated mean for non-quaternion components
         for i in range(0,self.n*2+1):
             est_mean = est_mean + self.weight_mean[i] * transformed_sigmas[i]
+        #Compute quaternion component mean
+        for i in range(0, self.n*2+1):
+            quat_temp = recover_quat(transformed_sigmas[i])
+            quat_sum = quat_sum + self.weight_mean[i] * quat_temp
+        #This should create a unit quaternion
+        est_quat = quat_sum / tf_math.vector_norm(quat_sum)
+        est_mean[0:3,0] = est_quat[0:3,0]
+        return est_mean
+
+    def estimate_covariance(self, est_mean, transformed_sigmas):
+        est_covariance = zeros(self.kalman_covariance.shape)
+        #Calculate the covariance for the non quaternion components
+        for i in range(0,self.n*2+1):
+            diff = transformed_sigmas[i][3:,0] - est_mean[3:,0]
+            prod = dot(diff, diff.T)
+            est_covariance[3:,3:] = est_covariance[3:,3:] + self.weight_covariance[i] * \
+                prod
+        #Calculate the covariance for the quaternion components
+        mean_quat = recover_quat(est_mean)
+        inverse_mean_quat = tf_math.quaternion_inverse(mean_quat.flatten)
+        for i in range(0,self.n*2+1):
+            sig_quat = recover_quat(transformed_sigmas[i])
+            error_quat = tf_math.quaternion_multiply(sig_quat, \
+                    inverse_mean_quat)
+            prod = dot(error_quat[0:3], error_quat[0:3].T)
+            term = self.weight_covariance[i] * prod
+            est_covariance[0:3,0:3] = est_covariance[0:3,0:3] + term
+        return est_covariance
+
 
     def handle_measurement(self, measurement):
         if not self.is_initialized:
@@ -97,13 +136,6 @@ class SF9DOF_UKF:
             transformed_sigmas = [prediction(sigma, dt) for sigma in sigmas]
             #Estimate the mean
             est_mean = self.estimate_mean(transformed_sigmas)
-            est_covariance = zeros(self.kalman_covariance.shape)
-            for i in range(0,self.n*2+1):
-                diff = transformed_sigmas[i] - est_mean
-                prod = dot(diff, diff.T)
-                est_covariance = est_covariance + self.weight_covariance[i] * \
-                        prod
-            est_covariance = est_covariance + self.process_noise(est_mean, dt)
             est_sigmas = self.generate_sigma_points(est_mean, est_covariance)
             self.time = measurement.header.stamp
 
@@ -128,14 +160,14 @@ class SF9DOF_UKF:
             original_quat = mean[0:4,0]
             #Do the additive sample
             perturbed_quat = tf_math.quaternion_multiply(noise_quat,original_quat)
-            perturbed_quat = tf_math.unit_vector(perturbed_quat)
+            #perturbed_quat = tf_math.unit_vector(perturbed_quat)
             new_mean = mean + column
             new_mean[0:3,0] = perturbed_quat[0:3,0]
             sigmas.append(new_mean)
             #Do the subtractive sample
             conj_noise_quat = tf_math.quaternion_conjugate(noise_quat)
             perturbed_quat = tf_math.quaternion_multiply(conj_noise_quat, original_quat)
-            perturbed_quat = tf_math.unit_vector(perturbed_quat)
+            #perturbed_quat = tf_math.unit_vector(perturbed_quat)
             new_mean = mean - column
             new_mean[0:3,0] = perturbed_quat[0:3,0]
             sigmas.append(new_mean)
