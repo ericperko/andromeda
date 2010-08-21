@@ -33,9 +33,9 @@ class SF9DOF_UKF:
                 + (1- pow(self.alpha, 2) + self.beta)
         self.initialize_filter()
 
-    def initialize_filter(self):
+    def initialize_filter(self, time):
         self.is_initialized = False
-        self.time = rospy.Time.now()
+        self.time = time
         self.kalman_state = zeros((self.n,1))
         self.kalman_covariance = diag(ones(self.kalman_state.shape[0]))
         self.kalman_state[0:3,0] = \
@@ -105,7 +105,7 @@ class SF9DOF_UKF:
                         prod
             est_covariance = est_covariance + self.process_noise(est_mean, dt)
             est_sigmas = self.generate_sigma_points(est_mean, est_covariance)
-            self.time = rospy.Time.now()
+            self.time = measurement.header.stamp
 
 
     def generate_sigma_points(self, mean, covariance):
@@ -144,5 +144,6 @@ class SF9DOF_UKF:
 if __name__ == "__main__":
     rospy.init_node("sf9dof_ukf")
     ukf = SF9DOF_UKF()
+    ukf.initialize_filter(rospy.Time.now())
     rospy.Subscriber("state", State, ukf.handle_measurement)
     rospy.spin()
