@@ -6,6 +6,7 @@ import rospy
 
 from sparkfun_9dof_razor.msg import State
 from sensor_msgs.msg import Imu
+from geometry_msgs.msg import Quaternion
 import tf.transformations as tf_math
 
 from numpy import *
@@ -18,8 +19,8 @@ class SF9DOF_UKF:
         self.beta = rospy.get_param("~beta", 2)
         self.alpha = rospy.get_param("~alpha", 2)
         self.kappa = rospy.get_param("~kappa", 1.5)
-        self.gravity_vector = array([0.04,0.,9.8,0.])
-        self.magnetic_vector = array([0.03,0.12,0.42,0.])
+        self.gravity_vector = array([0.04,0.,9.8])
+        self.magnetic_vector = array([0.03,0.12,0.42])
         self.n = 18
         self.kf_lambda = pow(self.alpha,2.) * (self.n + self.kappa) - self.n
         self.weight_covariance = ones(self.n * 2 + 1)
@@ -31,12 +32,13 @@ class SF9DOF_UKF:
         self.weight_mean[0] = self.kf_lambda / (self.n + self.kf_lambda)
         self.weight_covariance[0] = self.kf_lambda / (self.n + self.kf_lambda)\
                 + (1- pow(self.alpha, 2) + self.beta)
-        self.initialize_filter()
 
     def initialize_filter(self, time):
         self.is_initialized = False
         self.time = time
         self.kalman_state = zeros((self.n,1))
+        self.kalman_state[15:18,0] = self.gravity_vector
+        self.kalman_state[12:15,0] = self.magnetic_vector
         self.kalman_covariance = diag(ones(self.kalman_state.shape[0]))
         self.kalman_state[0:3,0] = \
                 tf_math.quaternion_from_euler(0,0,0,'sxyz')[0:3]
@@ -83,22 +85,67 @@ class SF9DOF_UKF:
         return quat_temp
 
     @staticmethod
+    def build_noise_quat(noise_vec):
+        noise_quat = ones((4,1))
+        noise_mag = tf_math.vector_norm(noise_vec)
+        noise_quat_vec_part = noise_vec * sin(noise_mag/2.)/noise_mag
+        noise_quat[0:3,0] = noise_quat_vec_part
+        noise_quat[3,0] = cos(noise_mag/2.)
+        return noise_quat
+
+    @staticmethod
+    def correct_mean(est_mean, correction):
+        error_quat = recover_quat(correction)
+        original_quat = recover_quat(est_mean)
+        corrected_quat = tf_math.quaternion_multiply(error_quat, original_quat)
+        corrected_mean = est_mean + correction
+        corrected_mean[0:3,0] = corrected_quat[0:3,0]
+        return corrected_mean
+
+    @staticmethod
     def process_noise(current_state, dt, controls = None):
         return diag(ones(current_state.shape[0]) * 0.1)
 
-    def measurement_update(self, current_state, dt, measurement):
-        pass
+    @staticmethod
+    def measurement_noise(measurement, dt):
+        return diag(ones(measurement.shape[0]) * 0.1)
+
+    @staticmethod
+    def measurement_update(current_state, dt, measurement):
+        predicted_measurement = zeros(measurement.shape)
+        orientation = recover_quat(current_state)
+        #Calculate predicted magnetometer readings
+        h_vec = zeros((4,1))
+        h_vec[0:3,0] = current_state[12:15,0]
+        h_vec[3,0] = 0.
+        temp = tf_math.quaternion_multiply(orientation, h_vec)
+        result = tf_math.quaternion_multiply(temp, \
+                tf_math.quaternion_conjugate(orientation))
+        predicted_measurement[0:3,0] = result[0:3]
+        #Calculate the predicted gyro readings
+        temp_gyro = current_state[3:6,0] + current_state[9:12,0]
+        predicted_measurement[3:6,0] = temp_gyro
+        #Calculate the predicted accelerometer readings
+        g_vec = zeros((4,1))
+        g_vec[0:3,0] = current_state[15:18,0]
+        g_vec[3,0] = 0.
+        temp = tf_math.quaternion_multiply(orientation, g_vec)
+        result = tf_math.quaternion_multiply(temp, \
+                tf_math.quaternion_conjugate(orientation))
+        temp_accel = current_state[6:9,0] + result
+        predicted_measurement[6:9,0] = temp_accel[0:3]
+        return predicted_measurement
 
     def estimate_mean(self, transformed_sigmas):
         quat_sum = zeros((4,1))
         est_mean = zeros(self.kalman_state.shape)
         #Compute estimated mean for non-quaternion components
         for i in range(0,self.n*2+1):
-            est_mean = est_mean + self.weight_mean[i] * transformed_sigmas[i]
+            est_mean += self.weight_mean[i] * transformed_sigmas[i]
         #Compute quaternion component mean
         for i in range(0, self.n*2+1):
             quat_temp = recover_quat(transformed_sigmas[i])
-            quat_sum = quat_sum + self.weight_mean[i] * quat_temp
+            quat_sum += self.weight_mean[i] * quat_temp
         #This should create a unit quaternion
         est_quat = quat_sum / tf_math.vector_norm(quat_sum)
         est_mean[0:3,0] = est_quat[0:3,0]
@@ -106,39 +153,123 @@ class SF9DOF_UKF:
 
     def estimate_covariance(self, est_mean, transformed_sigmas):
         est_covariance = zeros(self.kalman_covariance.shape)
-        #Calculate the covariance for the non quaternion components
-        for i in range(0,self.n*2+1):
-            diff = transformed_sigmas[i][3:,0] - est_mean[3:,0]
-            prod = dot(diff, diff.T)
-            est_covariance[3:,3:] = est_covariance[3:,3:] + self.weight_covariance[i] * \
-                prod
-        #Calculate the covariance for the quaternion components
+        diff = zeros(est_mean.shape)
+        #Calculate the inverse mean quat
         mean_quat = recover_quat(est_mean)
         inverse_mean_quat = tf_math.quaternion_inverse(mean_quat.flatten)
         for i in range(0,self.n*2+1):
+            #Calculate the error for the quaternion
             sig_quat = recover_quat(transformed_sigmas[i])
             error_quat = tf_math.quaternion_multiply(sig_quat, \
                     inverse_mean_quat)
-            prod = dot(error_quat[0:3], error_quat[0:3].T)
+            diff[0:3,0] = error_quat[0:3]
+            #Calculate the error for the rest of the state
+            diff[3:,0] = transformed_sigmas[i][3:,0] - est_mean[3:,0]
+            prod = dot(diff, diff.T)
             term = self.weight_covariance[i] * prod
-            est_covariance[0:3,0:3] = est_covariance[0:3,0:3] + term
+            est_covariance += term
         return est_covariance
 
+    def estimate_measurement_mean(self, measurement_sigmas):
+        est_measurement = zeros(measurement_sigmas[0].shape)
+        for i in range(0, self.n*2+1):
+            term = self.weight_mean[i] * measurement_sigmas[i]
+            est_measurement += term
+        return est_measurement
 
-    def handle_measurement(self, measurement):
+    def estimate_measurement_covariance(self, measurement_mean, \
+            measurement_sigmas):
+        est_measurement_covariance = eye(measurement_mean.shape[0])
+        for i in range(0,self.n*2+1):
+            diff = measurement_sigmas[i] - measurement_mean
+            prod = dot(diff, diff.T)
+            term = self.weight_covariance[i] * prod
+            estimate_measurement_covariance += term
+        return estimate_measurement_covariance
+
+    def cross_correlation_mat(self, est_mean, est_sigmas, meas_mean, meas_sigmas):
+        cross_correlation_mat = zeros((est_mean.shape[0], meas_mean.shape[0]))
+        est_diff = zeros(est_mean.shape)
+        mean_quat = recover_quat(est_mean)
+        inverse_mean_quat = tf_math.quaternion_inverse(mean_quat.flatten)
+        for i in range(0,self.n*2+1):
+            #Calculate the error for the quaternion
+            sig_quat = recover_quat(est_sigmas[i])
+            error_quat = tf_math.quaternion_multiply(sig_quat, \
+                    inverse_mean_quat)
+            est_diff[0:3,0] = error_quat[0:3]
+            #Calculate the error for the rest of the state
+            est_diff[3:,0] = est_sigmas[i][3:,0] - est_mean[3:,0]
+            meas_diff = meas_sigmas[i] - meas_mean
+            prod = dot(est_diff, meas_diff.T)
+            term = self.weight_covariance[i] * prod
+            cross_correlation_mat += term
+        return cross_correlation_mat
+
+    @staticmethod
+    def stateMsgToMat(measurement_msg):
+        measurement = zeros((9,1))
+        measurement[0,0] = measurement_msg.magnetometer.x
+        measurement[1,0] = measurement_msg.magnetometer.y
+        measurement[2,0] = measurement_msg.magnetometer.z
+        measurement[3,0] = measurement_msg.angular_velocity.x
+        measurement[4,0] = measurement_msg.angular_velocity.y
+        measurement[5,0] = measurement_msg.angular_velocity.z
+        measurement[6,0] = measurement_msg.linear_acceleration.x
+        measurement[7,0] = measurement_msg.linear_acceleration.y
+        measurement[8,0] = measurement_msg.linear_acceleration.z
+        return measurement
+
+    def handle_measurement(self, measurement_msg):
         if not self.is_initialized:
             rospy.logwarn("Filter is unintialized. Discarding measurement")
         else:
+            dt = (measurement_msg.header.stamp - self.time).to_sec()
+            measurement = stateMsgToMat(measurement_msg)
+            p_noise = process_noise(self.kalman_state, dt)
             sigmas = self.generate_sigma_points(self.kalman_state,
-                    self.kalman_covariance + process_noise())
-            dt = (measurement.header.stamp - self.time).to_sec()
+                    self.kalman_covariance + p_noise)
             #Run each sigma through the prediction function
             transformed_sigmas = [prediction(sigma, dt) for sigma in sigmas]
             #Estimate the mean
             est_mean = self.estimate_mean(transformed_sigmas)
+            est_covariance = self.estimate_covariance(est_mean, \
+                    transformed_sigmas)
             est_sigmas = self.generate_sigma_points(est_mean, est_covariance)
-            self.time = measurement.header.stamp
+            #Run each of the new sigmas through the measurement update function
+            measurement_sigmas = [measurement_update(sigma, dt, \
+                    measurement) for sigma in est_sigmas]
+            measurement_mean = \
+                    self.estimate_measurement_mean(measurement_sigmas)
+            measurement_covariance = \
+                    self.estimate_measurement_covariance(measurement_mean, \
+                    measurement_sigmas)
+            measurement_covariance += measurement_noise(measurement_mean, dt)
+            cross_correlation_mat = self.cross_correlation_mat(est_mean, \
+                    est_sigmas, measurement_mean, measurement_sigmas)
+            s_inv = numpy.linalg.pinv(measurement_covariance)
+            kalman_gain = dot(cross_correlation_mat, s_inv)
+            innovation =  measurement - measurement_mean
+            correction = dot(kalman_gain, innovation)
+            self.kalman_state = correct_mean(est_mean, correction)
+            temp = dot(kalman_gain, measurement_covariance)
+            temp = dot(temp, kalman_gain.T)
+            self.kalman_covariance = est_covariance - temp
+            self.time = measurement_msg.header.stamp
+            self.publish_imu()
 
+    def publish_imu(self):
+        imu_msg = Imu()
+        imu_msg.header.stamp = self.time
+        imu_msg.header.frame_id = 'imu'
+        imu_msg.orientation = Quaterion(*recover_quat(self.kalman_state))
+        imu_msg.angular_velocity.x = self.kalman_state[3,0]
+        imu_msg.angular_velocity.y = self.kalman_state[4,0]
+        imu_msg.angular_velocity.z = self.kalman_state[5,0]
+        imu_msg.linear_acceleration.x = self.kalman_state[6,0]
+        imu_msg.linear_acceleration.y = self.kalman_state[7,0]
+        imu_msg.linear_acceleration.z = self.kalman_state[8,0]
+        self.pub.publish(imu_msg)
 
     def generate_sigma_points(self, mean, covariance):
         sigmas = []
@@ -152,12 +283,8 @@ class SF9DOF_UKF:
             column = temp[:,i].reshape((self.n,1))
             #Build the noise quaternion
             noise_vec = column[0:3,0]
-            noise_quat = ones((4,1))
-            noise_mag = tf_math.vector_norm(noise_vec)
-            noise_quat_vec_part = noise_vec * sin(noise_mag/2.)/noise_mag
-            noise_quat[0:3,0] = noise_quat_vec_part
-            noise_quat[3,0] = cos(noise_mag/2.)
-            original_quat = mean[0:4,0]
+            noise_quat = build_noise_quat(noise_vec)
+            original_quat = recover_quat(mean)
             #Do the additive sample
             perturbed_quat = tf_math.quaternion_multiply(noise_quat,original_quat)
             #perturbed_quat = tf_math.unit_vector(perturbed_quat)
