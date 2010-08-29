@@ -16,9 +16,9 @@ class SF9DOF_UKF:
     def __init__(self):
         self.pub = rospy.Publisher("imu_estimate", Imu)
         self.is_initialized = False
-        self.beta = rospy.get_param("~beta", 2)
-        self.alpha = rospy.get_param("~alpha", 2)
-        self.kappa = rospy.get_param("~kappa", 1.5)
+        self.beta = rospy.get_param("~beta", 2.)
+        self.alpha = rospy.get_param("~alpha", 0.001)
+        self.kappa = rospy.get_param("~kappa", 0.)
         self.gravity_vector = array([0.04,0.,9.8])
         self.magnetic_vector = array([0.03,0.12,0.42])
         self.n = 18
@@ -108,11 +108,13 @@ class SF9DOF_UKF:
 
     @staticmethod
     def process_noise(current_state, dt, controls = None):
-        return diag(ones(current_state.shape[0]) * 0.1)
+        noise = ones(current_state.shape[0]) * 0.1
+        noise[9:] = 0.001
+        return diag(noise)
 
     @staticmethod
     def measurement_noise(measurement, dt):
-        return diag(ones(measurement.shape[0]) * 0.1)
+        return diag(ones(measurement.shape[0]) * 0.01)
 
     @staticmethod
     def measurement_update(current_state, dt, measurement):
@@ -228,6 +230,7 @@ class SF9DOF_UKF:
         if not self.is_initialized:
             rospy.logwarn("Filter is unintialized. Discarding measurement")
         else:
+            t0 = rospy.Time.now()
             dt = (measurement_msg.header.stamp - self.time).to_sec()
             measurement = SF9DOF_UKF.stateMsgToMat(measurement_msg)
             p_noise = SF9DOF_UKF.process_noise(self.kalman_state, dt)
@@ -261,6 +264,8 @@ class SF9DOF_UKF:
             self.kalman_covariance = est_covariance - temp
             self.time = measurement_msg.header.stamp
             self.publish_imu()
+            rospy.logdebug("Took %s sec to run filter",(rospy.Time.now() - \
+                t0).to_sec())
 
     def publish_imu(self):
         imu_msg = Imu()
@@ -305,7 +310,7 @@ class SF9DOF_UKF:
         return sigmas
 
 if __name__ == "__main__":
-    rospy.init_node("sf9dof_ukf")
+    rospy.init_node("sf9dof_ukf", log_level=rospy.DEBUG)
     ukf = SF9DOF_UKF()
     ukf.initialize_filter(rospy.Time.now())
     rospy.Subscriber("state", State, ukf.handle_measurement)
