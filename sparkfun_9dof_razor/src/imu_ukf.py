@@ -5,6 +5,7 @@ roslib.load_manifest("sparkfun_9dof_razor")
 import rospy
 
 from sparkfun_9dof_razor.msg import State
+from sparkfun_9dof_razor.msg import RawFilter
 from sensor_msgs.msg import Imu
 from geometry_msgs.msg import Quaternion
 import tf.transformations as tf_math
@@ -15,6 +16,7 @@ import numpy.linalg
 class SF9DOF_UKF:
     def __init__(self):
         self.pub = rospy.Publisher("imu_estimate", Imu)
+        self.raw_pub = rospy.Publisher("raw_filter", RawFilter)
         self.is_initialized = False
         self.beta = rospy.get_param("~beta", 2.)
         self.alpha = rospy.get_param("~alpha", 0.001)
@@ -264,6 +266,7 @@ class SF9DOF_UKF:
             self.kalman_covariance = est_covariance - temp
             self.time = measurement_msg.header.stamp
             self.publish_imu()
+            self.publish_raw_filter()
             rospy.logdebug("Took %s sec to run filter",(rospy.Time.now() - \
                 t0).to_sec())
 
@@ -272,13 +275,26 @@ class SF9DOF_UKF:
         imu_msg.header.stamp = self.time
         imu_msg.header.frame_id = 'imu'
         imu_msg.orientation = Quaternion(*SF9DOF_UKF.recover_quat(self.kalman_state))
+        imu_msg.orientation_covariance = \
+               list(self.kalman_covariance[0:3,0:3].flatten())
         imu_msg.angular_velocity.x = self.kalman_state[3,0]
         imu_msg.angular_velocity.y = self.kalman_state[4,0]
         imu_msg.angular_velocity.z = self.kalman_state[5,0]
+        imu_msg.angular_velocity_covariance = \
+                list(self.kalman_covariance[3:6,3:6].flatten())
         imu_msg.linear_acceleration.x = self.kalman_state[6,0]
         imu_msg.linear_acceleration.y = self.kalman_state[7,0]
         imu_msg.linear_acceleration.z = self.kalman_state[8,0]
+        imu_msg.linear_acceleration_covariance = \
+               list(self.kalman_covariance[6:9,6:9].flatten())
         self.pub.publish(imu_msg)
+
+    def publish_raw_filter(self):
+        filter_msg = RawFilter()
+        filter_msg.header.stamp = self.time
+        filter_msg.state = list(self.kalman_state.flatten())
+        filter_msg.covariance = list(self.kalman_covariance.flatten())
+        self.raw_pub.publish(filter_msg)
 
     def generate_sigma_points(self, mean, covariance):
         sigmas = []
