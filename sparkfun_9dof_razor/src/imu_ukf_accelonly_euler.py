@@ -17,15 +17,14 @@ import numpy.linalg
 
 class SF9DOF_UKF:
     def __init__(self):
+        self.is_initialized = False
         self.pub = rospy.Publisher("imu_estimate", Imu)
         self.raw_pub = rospy.Publisher("raw_filter", RawFilter)
         self.is_initialized = False
         self.beta = rospy.get_param("~beta", 2.)
         self.alpha = rospy.get_param("~alpha", 0.001)
         self.kappa = rospy.get_param("~kappa", 0.)
-        self.gravity_vector = array([0.04,0.,9.8])
-        self.magnetic_vector = array([0.03,0.12,0.42])
-        self.n = 9
+        self.n = 2
         self.kf_lambda = pow(self.alpha,2.) * (self.n + self.kappa) - self.n
         self.weight_covariance = ones(self.n * 2 + 1)
         self.weight_mean = ones(self.n * 2 + 1)
@@ -38,54 +37,36 @@ class SF9DOF_UKF:
                 + (1- pow(self.alpha, 2) + self.beta)
 
     def initialize_filter(self, time):
-        self.is_initialized = False
         self.time = time
         self.kalman_state = zeros((self.n,1))
         self.kalman_covariance = diag(ones(self.kalman_state.shape[0]))
-        self.kalman_covariance[2,2] = .001;
         self.is_initialized = True
 
     @staticmethod
     def prediction(current_state, dt, controls = None):
-        #Pass the gyros, accelerations, biases, static magnetic field and
-        #gravity straight through
         predicted_state = current_state.copy()
-        #Get the best estimate of the current angular rate
-        omega = predicted_state[3:6,0]
-        #Rotate the previous orientation by this new amount
-        predicted_state[0:3,0] = predicted_state[0:3,0] + omega * dt; # Pray for scalar multiply
-        #Return a prediction
         return predicted_state
 
     @staticmethod
     def process_noise(current_state, dt, controls = None):
-        noise = ones(current_state.shape[0]) * 0.001
-        noise[3:6] = 10
-        noise[6:9] = 1e-4
+        noise = ones(current_state.shape[0]) * 0.01
         return diag(noise)
 
     @staticmethod
     def measurement_noise(measurement, dt):
-        return diag(ones(measurement.shape[0]) * 0.1)
+        return diag(ones(measurement.shape[0]) * 0.01)
 
     @staticmethod
     def measurement_update(current_state, dt, measurement):
         predicted_measurement = zeros(measurement.shape)
-        #Calculate the predicted gyro readings
         r = current_state[0,0]
         p = current_state[1,0]
-        w = current_state[2,0]
-        vr = current_state[3,0]
-        vp = current_state[4,0]
-        vw = current_state[5,0]
-        g = math.sqrt(pow(measurement[3,0],2)+pow(measurement[4,0],2)+pow(measurement[5,0],2))
-        predicted_measurement[0,0] = vr - vw*math.sin(p) + current_state[6,0]
-        predicted_measurement[1,0] = vp*math.cos(r)+vw*math.sin(r)*math.cos(p)+current_state[7,0]
-        predicted_measurement[2,0] = vw*math.cos(r)*math.cos(p)-vp*math.sin(r) + current_state[8,0]
+        g = math.sqrt(pow(measurement[6,0],2)+pow(measurement[7,0],2)+pow(measurement[8,0],2))
         #Calculate the predicted accelerometer readings
-        predicted_measurement[3,0] = -g*math.sin(p)
-        predicted_measurement[4,0] = -g*math.sin(r)
-        predicted_measurement[5,0] = g-math.sqrt(pow(predicted_measurement[3,0],2)+pow(predicted_measurement[4,0],2))
+        predicted_measurement[6,0] = -g*math.sin(p)
+        predicted_measurement[7,0] = g*math.sin(r)
+        predicted_measurement[8,0] = g-math.sqrt(pow(predicted_measurement[6,0],2)+pow(predicted_measurement[7,0],2))
+        print predicted_measurement
         return predicted_measurement
 
     def estimate_mean(self, transformed_sigmas):
@@ -144,7 +125,7 @@ class SF9DOF_UKF:
         measurement[5,0] = measurement_msg.angular_velocity.z
         measurement[6,0] = measurement_msg.linear_acceleration.x
         measurement[7,0] = measurement_msg.linear_acceleration.y
-        measurement[8,0] = -measurement_msg.linear_acceleration.z
+        measurement[8,0] = measurement_msg.linear_acceleration.z
         return measurement
 
     def handle_measurement(self, measurement_msg):
@@ -154,7 +135,6 @@ class SF9DOF_UKF:
             t0 = rospy.Time.now()
             dt = (measurement_msg.header.stamp - self.time).to_sec()
             measurement = SF9DOF_UKF.stateMsgToMat(measurement_msg)
-            measurement = measurement[3:9] # remove magnetometers for now
             p_noise = SF9DOF_UKF.process_noise(self.kalman_state, dt)
             sigmas = self.generate_sigma_points(self.kalman_state,
                     self.kalman_covariance + p_noise)
@@ -190,6 +170,12 @@ class SF9DOF_UKF:
             rospy.logdebug("Took %s sec to run filter",(rospy.Time.now() - \
                     t0).to_sec())
 
+    def limitAngles(self):
+        # Limit roll to +- 90 degrees
+        #self.kalman_state
+        roll = self.kalman_state[0]
+        
+
     def publish_imu(self):
         imu_msg = Imu()
         imu_msg.header.stamp = self.time
@@ -197,15 +183,15 @@ class SF9DOF_UKF:
         # Ugh, stupid quats, just publish raw for now :-D
         imu_msg.orientation.x = self.kalman_state[0,0]
         imu_msg.orientation.y = self.kalman_state[1,0]
-        imu_msg.orientation.z = self.kalman_state[2,0]
-        #imu_msg.orientation.w = self.kalman_state[9,0]
-        imu_msg.orientation_covariance = \
-                list(self.kalman_covariance[0:3,0:3].flatten())
-        imu_msg.angular_velocity.x = self.kalman_state[3,0]
-        imu_msg.angular_velocity.y = self.kalman_state[4,0]
-        imu_msg.angular_velocity.z = self.kalman_state[5,0]
-        imu_msg.angular_velocity_covariance = \
-                list(self.kalman_covariance[3:6,3:6].flatten())
+        imu_msg.orientation.z = 0#self.kalman_state[2,0]
+        imu_msg.orientation.w = 0#self.kalman_state[9,0]
+        #imu_msg.orientation_covariance = \
+                #list(self.kalman_covariance[0:3,0:3].flatten())
+        imu_msg.angular_velocity.x = 0#self.kalman_state[3,0]
+        imu_msg.angular_velocity.y = 0#self.kalman_state[4,0]
+        imu_msg.angular_velocity.z = 0#self.kalman_state[5,0]
+        #imu_msg.angular_velocity_covariance = \
+                #list(self.kalman_covariance[3:6,3:6].flatten())
         imu_msg.linear_acceleration.x = -1#self.kalman_state[6,0]
         imu_msg.linear_acceleration.y = -1#self.kalman_state[7,0]
         imu_msg.linear_acceleration.z = -1#self.kalman_state[8,0]
@@ -239,7 +225,7 @@ class SF9DOF_UKF:
         return sigmas
 
 if __name__ == "__main__":
-    rospy.init_node("sf9dof_ukf", log_level=rospy.DEBUG)
+    rospy.init_node("sf9dof_accel_ukf", log_level=rospy.DEBUG)
     ukf = SF9DOF_UKF()
     ukf.initialize_filter(rospy.Time.now())
     rospy.Subscriber("state", State, ukf.handle_measurement)
