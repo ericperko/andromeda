@@ -96,7 +96,7 @@ class SF9DOF_UKF:
         noise[3:6] = 10; # angular velocity uncertanty
         noise[6:9] = .0001 # gyro bias uncertanty
         noise[9:11] = .0001 # magnetic field component uncertanty
-        noise[11:14] = .01 # acceleration estimation uncertanty
+        noise[11:14] = 1 # acceleration estimation uncertanty
         return diag(noise)
 
     @staticmethod
