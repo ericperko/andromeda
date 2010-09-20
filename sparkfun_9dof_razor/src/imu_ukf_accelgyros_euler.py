@@ -242,7 +242,7 @@ class SF9DOF_UKF:
         return sigmas
 
 if __name__ == "__main__":
-    rospy.init_node("sf9dof_accel_ukf", log_level=rospy.DEBUG)
+    rospy.init_node("sf9dof_accelgyro_ukf", log_level=rospy.DEBUG)
     ukf = SF9DOF_UKF()
     ukf.initialize_filter(rospy.Time.now())
     rospy.Subscriber("state", State, ukf.handle_measurement)

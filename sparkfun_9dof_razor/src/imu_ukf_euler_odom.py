@@ -23,7 +23,7 @@ class SF9DOF_UKF:
         self.beta = rospy.get_param("~beta", 2.)
         self.alpha = rospy.get_param("~alpha", 0.001)
         self.kappa = rospy.get_param("~kappa", 0.)
-        self.n = 14
+        self.n = 11
         self.kf_lambda = pow(self.alpha,2.) * (self.n + self.kappa) - self.n
         self.weight_covariance = ones(self.n * 2 + 1)
         self.weight_mean = ones(self.n * 2 + 1)
@@ -78,15 +78,8 @@ class SF9DOF_UKF:
     @staticmethod
     def prediction(current_state, dt, controls = None):
         predicted_state = current_state.copy()
-        r = current_state[0,0]
-        p = current_state[1,0]
-        w = current_state[2,0]
-        vr = current_state[3,0]
-        vp = current_state[4,0]
-        vw = current_state[5,0]
-        predicted_state[0,0] = r + (vr - vw*math.sin(p))*dt
-        predicted_state[1,0] = p + (vp*math.cos(r)+vw*math.sin(r)*math.cos(p))*dt
-        predicted_state[2,0] = w + (vw*math.cos(r)*math.cos(p)-vp*math.sin(r))*dt
+        omegas = current_state[3:6]
+        predicted_state[0:3] = current_state[0:3] + omegas*dt
         predicted_state = predicted_state
         return predicted_state
 
@@ -96,7 +89,6 @@ class SF9DOF_UKF:
         noise[3:6] = 10; # angular velocity uncertanty
         noise[6:9] = .0001 # gyro bias uncertanty
         noise[9:11] = .0001 # magnetic field component uncertanty
-        noise[11:14] = .01 # acceleration estimation uncertanty
         return diag(noise)
 
     @staticmethod
@@ -105,7 +97,6 @@ class SF9DOF_UKF:
         noise[0:3] = .01 # magnetomer noise
         noise[3:6] = .01 # gyro noise
         noise[6:9] = .01 # accelerometer noise
-        noise[9:12] = noise[6:9] # fake accelerometer noise
         return diag(noise)
 
     @staticmethod
@@ -122,9 +113,6 @@ class SF9DOF_UKF:
         bw = current_state[8,0]
         mxy = current_state[9,0]
         mz = current_state[10,0]
-        ax = current_state[11,0]
-        ay = current_state[12,0]
-        az = current_state[13,0]
         g = math.sqrt(pow(measurement[6,0],2)+pow(measurement[7,0],2)+pow(measurement[8,0],2))
         m = math.sqrt(pow(mxy,2)+pow(mz,2))
         #Calculate the predicted compass heading
@@ -132,17 +120,13 @@ class SF9DOF_UKF:
         predicted_measurement[1,0] = mxy*math.sin(w) - mz*math.sin(r)
         predicted_measurement[2,0] = m - math.sqrt(pow(predicted_measurement[0,0],2)+pow(predicted_measurement[1,0],2))
         #Calculate the predicted gyro readings
-        predicted_measurement[3,0] = vr + current_state[6,0]
-        predicted_measurement[4,0] = vp + current_state[7,0]
-        predicted_measurement[5,0] = vw + current_state[8,0]
+        predicted_measurement[3,0] = vr - vw*math.sin(p) + current_state[6,0]
+        predicted_measurement[4,0] = vp*math.cos(r)+vw*math.sin(r)*math.cos(p)+current_state[7,0]
+        predicted_measurement[5,0] = vw*math.cos(r)*math.cos(p)-vp*math.sin(r) + current_state[8,0]
         #Calculate the predicted accelerometer readings
         predicted_measurement[6,0] = -g*math.sin(p)
         predicted_measurement[7,0] = g*math.sin(r)
-        predicted_measurement[8,0] = g-math.sqrt(pow(predicted_measurement[6,0],2)+pow(predicted_measurement[7,0],2)) # not sure how to handle upside down yet
-        #Calculate the doubled accelerometers (for pure filtering)
-        predicted_measurement[9,0] = ax
-        predicted_measurement[10,0] = ay
-        predicted_measurement[11,0] = az
+        predicted_measurement[8,0] = g-math.sqrt(pow(predicted_measurement[6,0],2)+pow(predicted_measurement[7,0],2))
         return predicted_measurement
 
     def estimate_mean(self, transformed_sigmas):
@@ -192,7 +176,7 @@ class SF9DOF_UKF:
 
     @staticmethod
     def stateMsgToMat(measurement_msg):
-        measurement = zeros((12,1))
+        measurement = zeros((9,1))
         measurement[0,0] = measurement_msg.magnetometer.x
         measurement[1,0] = measurement_msg.magnetometer.y
         measurement[2,0] = measurement_msg.magnetometer.z
@@ -202,9 +186,6 @@ class SF9DOF_UKF:
         measurement[6,0] = measurement_msg.linear_acceleration.x
         measurement[7,0] = measurement_msg.linear_acceleration.y
         measurement[8,0] = measurement_msg.linear_acceleration.z
-        measurement[9,0] = measurement_msg.linear_acceleration.x
-        measurement[10,0] = measurement_msg.linear_acceleration.y
-        measurement[11,0] = measurement_msg.linear_acceleration.z
         return measurement
 
     def handle_measurement(self, measurement_msg):
@@ -241,8 +222,6 @@ class SF9DOF_UKF:
             innovation = innovation
             correction = dot(kalman_gain, innovation)
             self.kalman_state = est_mean + correction
-            # Sneak in raw accelerometers
-            #self.kalman_state[11:14] = measurement[6:9]
             temp = dot(kalman_gain, measurement_covariance)
             temp = dot(temp, kalman_gain.T)
             self.kalman_covariance = est_covariance - temp
@@ -256,20 +235,21 @@ class SF9DOF_UKF:
         imu_msg = Imu()
         imu_msg.header.stamp = self.time
         imu_msg.header.frame_id = 'imu_odom'
-        quat = tf_math.quaternion_from_euler(self.kalman_state[0,0],self.kalman_state[1,0],self.kalman_state[2,0], axes='sxyz')
-        imu_msg.orientation.x = quat[0]
-        imu_msg.orientation.y = quat[1]
-        imu_msg.orientation.z = quat[2]
-        imu_msg.orientation.w = quat[3]
+        # Ugh, stupid quats, just publish raw for now :-D
+        imu_msg.orientation.x = self.kalman_state[0,0]
+        imu_msg.orientation.y = self.kalman_state[1,0]
+        imu_msg.orientation.z = self.limitTheta(self.kalman_state[2,0])
+        imu_msg.orientation.w = 0
         imu_msg.orientation_covariance = list(self.kalman_covariance[0:3,0:3].flatten())
         imu_msg.angular_velocity.x = self.kalman_state[3,0]
         imu_msg.angular_velocity.y = self.kalman_state[4,0]
         imu_msg.angular_velocity.z = self.kalman_state[5,0]
         imu_msg.angular_velocity_covariance = list(self.kalman_covariance[3:6,3:6].flatten())
-        imu_msg.linear_acceleration.x = self.kalman_state[11,0]
-        imu_msg.linear_acceleration.y = self.kalman_state[12,0]
-        imu_msg.linear_acceleration.z = self.kalman_state[13,0]
-        imu_msg.linear_acceleration_covariance = list(self.kalman_covariance[11:14,11:14].flatten())#[.01, 0, 0, 0, .01, 0, 0, 0, .01]
+        imu_msg.linear_acceleration.x = -1#self.kalman_state[6,0]
+        imu_msg.linear_acceleration.y = -1#self.kalman_state[7,0]
+        imu_msg.linear_acceleration.z = -1#self.kalman_state[8,0]
+        #imu_msg.linear_acceleration_covariance = \
+                #list(self.kalman_covariance[6:9,6:9].flatten())
         self.pub.publish(imu_msg)
 
     def publish_raw_filter(self):

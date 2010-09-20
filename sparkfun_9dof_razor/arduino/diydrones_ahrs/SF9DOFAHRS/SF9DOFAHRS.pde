@@ -69,7 +69,7 @@
 #define STATUS_LED 13 
 
 int8_t sensors[3] = {1,2,0};  // Map the ADC channels gyro_x, gyro_y, gyro_z
-int SENSOR_SIGN[9] = {1,-1,-1,-1,-1,1,-1,-1,-1};  //Correct directions x,y,z - gyros, accels, magnetormeter
+int SENSOR_SIGN[9] = {1,-1,-1,-1,-1,1,1,-1,-1};  //Correct directions x,y,z - gyros, accels, magnetormeter
 
 float G_Dt=0.02;    // Integration time (DCM algorithm)  We will run the integration loop at 50Hz if possible
 
