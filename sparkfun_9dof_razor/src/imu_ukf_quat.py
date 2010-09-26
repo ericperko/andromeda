@@ -248,11 +248,11 @@ class SF9DOF_UKF:
         c = self.kalman_state[5,0]
         d = self.kalman_state[6,0]
         q = math.sqrt(math.pow(a,2)+math.pow(b,2)+math.pow(c,2)+math.pow(d,2))
-        angles = tf_math.euler_from_quaternion(self.kalman_state[3:7,0])
-        imu_msg.orientation.x = angles[0]#a/q
-        imu_msg.orientation.y = angles[1]#b/q
-        imu_msg.orientation.z = angles[2]#c/q
-        imu_msg.orientation.w = 0#d/q
+        #angles = tf_math.euler_from_quaternion(self.kalman_state[3:7,0])
+        imu_msg.orientation.x = a/q#angles[0]
+        imu_msg.orientation.y = b/q
+        imu_msg.orientation.z = c/q
+        imu_msg.orientation.w = d/q
         imu_msg.orientation_covariance = list(self.kalman_covariance[3:6,3:6].flatten())
         imu_msg.angular_velocity.x = self.kalman_state[0,0]
         imu_msg.angular_velocity.y = self.kalman_state[1,0]
