@@ -22,7 +22,7 @@ class SF9DOF_UKF:
         self.beta = rospy.get_param("~beta", 2.)
         self.alpha = rospy.get_param("~alpha", 0.001)
         self.kappa = rospy.get_param("~kappa", 0.)
-        self.n = 7
+        self.n = 15
         self.kf_lambda = pow(self.alpha,2.) * (self.n + self.kappa) - self.n
         self.weight_covariance = ones(self.n * 2 + 1)
         self.weight_mean = ones(self.n * 2 + 1)
@@ -40,8 +40,8 @@ class SF9DOF_UKF:
         # initalize quaternions
         self.kalman_state[6,0] = 1
         # Guess at magnetic field components
-        #self.kalman_state[9,0] = .31
-        #self.kalman_state[10,0] = .21
+        self.kalman_state[13,0] = .31
+        self.kalman_state[14,0] = .21
         self.kalman_covariance = diag(ones(self.kalman_state.shape[0]))
         self.is_initialized = True
 
@@ -55,10 +55,13 @@ class SF9DOF_UKF:
         x5 = current_state[4,0]
         x6 = current_state[5,0]
         x7 = current_state[6,0]
-        predicted_state[0,0] = x1
-        predicted_state[1,0] = x2
-        predicted_state[2,0] = x3
+        x1b = current_state[7,0]
+        x2b = current_state[8,0]
+        x3b = current_state[9,0]
         sqrt2 = 1/(2*(math.sqrt(math.pow(x4,2)+math.pow(x5,2)+math.pow(x6,2)+math.pow(x7,2))))
+        predicted_state[0,0] = x1+x1b
+        predicted_state[1,0] = x2+x2b
+        predicted_state[2,0] = x3+x3b
         predicted_state[3,0] = x4 + sqrt2*(x3*x5-x2*x6+x1*x7)
         predicted_state[4,0] = x5 + sqrt2*(-x3*x4+x1*x6+x2*x7)
         predicted_state[5,0] = x6 + sqrt2*(x2*x4-x1*x5+x3*x7)
@@ -69,9 +72,9 @@ class SF9DOF_UKF:
     def process_noise(current_state, dt, controls = None):
         noise = ones(current_state.shape[0]) * 0.01
         noise[0:3] = 10; # angular velocity uncertanty
-        #noise[6:9] = .0001 # gyro bias uncertanty
-        #noise[9:11] = .0001 # magnetic field component uncertanty
-        #noise[11:14] = 1 # acceleration estimation uncertanty
+        noise[7:10] = .0001 # gyro bias uncertanty
+        noise[10:13] = 1 # acceleration estimation uncertanty
+        noise[13:15] = .0001 # magnetic field component uncertanty
         return diag(noise)
 
     @staticmethod
@@ -80,7 +83,7 @@ class SF9DOF_UKF:
         noise[0:3] = .01 # magnetomer noise
         noise[3:6] = .01 # gyro noise
         noise[6:9] = .01 # accelerometer noise
-        #noise[9:12] = noise[6:9] # fake accelerometer noise
+        noise[9:12] = noise[6:9] # fake accelerometer noise
         return diag(noise)
 
     @staticmethod
@@ -93,6 +96,7 @@ class SF9DOF_UKF:
         b = current_state[4,0]
         c = current_state[5,0]
         d = current_state[6,0]
+        # Rotation matrix components for quaternions
         R11 = math.pow(d,2)+math.pow(a,2)-math.pow(b,2)-math.pow(c,2)
         R12 = 2*(a*b-c*d)
         R13 = 2*(a*c+b*d)
@@ -105,10 +109,10 @@ class SF9DOF_UKF:
         denom = math.pow(a,2)+math.pow(b,2)+math.pow(c,2)+math.pow(d,2)
         g1 = 0
         g2 = 0
-        g3 = -9.81
-        h1 = .28
+        g3 = -math.sqrt(math.pow(measurement[6,0],2)+math.pow(measurement[7,0],2)+math.pow(measurement[8,0],2))
+        h1 = .28#current_state[13,0] # north component of magnetic field
         h2 = 0
-        h3 = .22
+        h3 = .22#current_state[14,0] # z component of magnetic field
         #Calculate the predicted magnetometer reading
         predicted_measurement[0,0] = (R11*h1+R12*h2+R13*h3)/denom
         predicted_measurement[1,0] = (R21*h1+R22*h2+R23*h3)/denom
@@ -121,6 +125,10 @@ class SF9DOF_UKF:
         predicted_measurement[6,0] = (R11*g1+R12*g2+R13*g3)/denom
         predicted_measurement[7,0] = (R21*g1+R22*g2+R23*g3)/denom
         predicted_measurement[8,0] = (R31*g1+R32*g2+R33*g3)/denom
+        #Fake accelerometer readings
+        predicted_measurement[9,0] = current_state[10,0]
+        predicted_measurement[10,0] = current_state[11,0]
+        predicted_measurement[11,0] = current_state[12,0]
         return predicted_measurement
 
     def estimate_mean(self, transformed_sigmas):
@@ -170,7 +178,7 @@ class SF9DOF_UKF:
 
     @staticmethod
     def stateMsgToMat(measurement_msg):
-        measurement = zeros((9,1))
+        measurement = zeros((12,1))
         measurement[0,0] = measurement_msg.magnetometer.x
         measurement[1,0] = measurement_msg.magnetometer.y
         measurement[2,0] = measurement_msg.magnetometer.z
@@ -180,6 +188,9 @@ class SF9DOF_UKF:
         measurement[6,0] = measurement_msg.linear_acceleration.x
         measurement[7,0] = measurement_msg.linear_acceleration.y
         measurement[8,0] = -measurement_msg.linear_acceleration.z
+        measurement[9,0] = measurement[6,0]
+        measurement[10,0] = measurement[7,0]
+        measurement[11,0] = measurement[8,0]
         return measurement
 
     def handle_measurement(self, measurement_msg):
@@ -247,10 +258,10 @@ class SF9DOF_UKF:
         imu_msg.angular_velocity.y = self.kalman_state[1,0]
         imu_msg.angular_velocity.z = self.kalman_state[2,0]
         imu_msg.angular_velocity_covariance = list(self.kalman_covariance[0:3,0:3].flatten())
-        imu_msg.linear_acceleration.x = 0#self.kalman_state[11,0]
-        imu_msg.linear_acceleration.y = 0#self.kalman_state[12,0]
-        imu_msg.linear_acceleration.z = 0#self.kalman_state[13,0]
-        imu_msg.linear_acceleration_covariance = [.01, 0, 0, 0, .01, 0, 0, 0, .01]#list(self.kalman_covariance[11:14,11:14].flatten())
+        imu_msg.linear_acceleration.x = self.kalman_state[10,0]
+        imu_msg.linear_acceleration.y = self.kalman_state[11,0]
+        imu_msg.linear_acceleration.z = self.kalman_state[12,0]
+        imu_msg.linear_acceleration_covariance = list(self.kalman_covariance[10:13,10:13].flatten())
         self.pub.publish(imu_msg)
 
     def publish_raw_filter(self):

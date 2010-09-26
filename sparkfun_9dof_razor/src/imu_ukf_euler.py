@@ -1,4 +1,5 @@
 #! /usr/bin/env python
+# -*- coding: utf-8 -*-
 
 # Attempt # 1
 
@@ -126,6 +127,7 @@ class SF9DOF_UKF:
         ay = current_state[12,0]
         az = current_state[13,0]
         g = math.sqrt(pow(measurement[6,0],2)+pow(measurement[7,0],2)+pow(measurement[8,0],2))
+        gsign =  1 #math.copysign(1.0, measurement[8,0])
         m = math.sqrt(pow(mxy,2)+pow(mz,2))
         #Calculate the predicted compass heading
         predicted_measurement[0,0] = mxy*math.cos(w) - mz*math.sin(p)
@@ -136,9 +138,9 @@ class SF9DOF_UKF:
         predicted_measurement[4,0] = vp + current_state[7,0]
         predicted_measurement[5,0] = vw + current_state[8,0]
         #Calculate the predicted accelerometer readings
-        predicted_measurement[6,0] = -g*math.sin(p)
-        predicted_measurement[7,0] = g*math.sin(r)
-        predicted_measurement[8,0] = g-math.sqrt(pow(predicted_measurement[6,0],2)+pow(predicted_measurement[7,0],2)) # not sure how to handle upside down yet
+        predicted_measurement[6,0] = gsign*-g*math.sin(p)
+        predicted_measurement[7,0] = gsign*g*math.sin(r)
+        predicted_measurement[8,0] = gsign*g-math.sqrt(pow(predicted_measurement[6,0],2)+pow(predicted_measurement[7,0],2)) # not sure how to handle upside down yet
         #Calculate the doubled accelerometers (for pure filtering)
         predicted_measurement[9,0] = ax
         predicted_measurement[10,0] = ay
