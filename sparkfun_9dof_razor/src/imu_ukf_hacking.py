@@ -12,6 +12,25 @@ import tf.transformations as tf_math
 
 from numpy import *
 import numpy.linalg
+import scipy.linalg.decomp
+import numpy.testing
+import pdb
+
+def pos_sem_def_sqrt(mat):
+    eigvals, eigvecs = scipy.linalg.decomp.eigh(mat)
+    rospy.loginfo("eigvals: %s", eigvals)
+    diag_sqrt = diag(sqrt(eigvals))
+    sqrt_mat = dot(dot(eigvecs, diag_sqrt), eigvecs.T)
+    return sqrt_mat
+
+
+def check_symmetry(mat):
+        try:
+            numpy.testing.assert_almost_equal(mat, mat.T)
+            return True
+        except AssertionError as e:
+            rospy.logerr(e)
+            return False
 
 class SF9DOF_UKF:
     def __init__(self):
@@ -23,14 +42,14 @@ class SF9DOF_UKF:
         self.kappa = rospy.get_param("~kappa", 0.)
         self.gravity_vector = array([0.04,0.,9.8])
         self.magnetic_vector = array([0.03,0.12,0.42])
-        self.n = 18
+        self.n = 6
         self.kf_lambda = pow(self.alpha,2.) * (self.n + self.kappa) - self.n
         self.weight_covariance = ones(self.n * 2 + 1)
         self.weight_mean = ones(self.n * 2 + 1)
-        self.weight_mean = self.weight_mean * (1. / (2 * (self.n +
-            self.kf_lambda)))
-        self.weight_covariance = self.weight_covariance * (1. / (2 * (self.n +
-            self.kf_lambda)))
+        self.weight_mean = self.weight_mean * (1. / (2 * (self.n + \
+                self.kf_lambda)))
+        self.weight_covariance = self.weight_covariance * (1. / (2 * (self.n +\
+                self.kf_lambda)))
         self.weight_mean[0] = self.kf_lambda / (self.n + self.kf_lambda)
         self.weight_covariance[0] = self.kf_lambda / (self.n + self.kf_lambda)\
                 + (1- pow(self.alpha, 2) + self.beta)
@@ -39,9 +58,8 @@ class SF9DOF_UKF:
         self.is_initialized = False
         self.time = time
         self.kalman_state = zeros((self.n,1))
-        self.kalman_state[15:18,0] = self.gravity_vector
-        self.kalman_state[12:15,0] = self.magnetic_vector
-        self.kalman_covariance = diag(ones(self.kalman_state.shape[0]))
+        self.kalman_covariance = diag(ones(self.kalman_state.shape[0]) * 1.)
+        check_symmetry(self.kalman_covariance)
         self.kalman_state[0:3,0] = \
                 tf_math.quaternion_from_euler(0,0,0,'sxyz')[0:3]
         self.is_initialized = True
@@ -110,38 +128,37 @@ class SF9DOF_UKF:
 
     @staticmethod
     def process_noise(current_state, dt, controls = None):
-        noise = ones(current_state.shape[0]) * 0.1
-        noise[9:] = 0.001
+        noise = ones(current_state.shape[0]) * 1e-3
         return diag(noise)
 
     @staticmethod
     def measurement_noise(measurement, dt):
-        return diag(ones(measurement.shape[0]) * 0.01)
+        return diag(ones(measurement.shape[0]) * 1e-2)
 
     @staticmethod
     def measurement_update(current_state, dt, measurement):
         predicted_measurement = zeros(measurement.shape)
-        orientation = SF9DOF_UKF.recover_quat(current_state)
+        #orientation = SF9DOF_UKF.recover_quat(current_state)
         #Calculate predicted magnetometer readings
-        h_vec = zeros((4,1))
-        h_vec[0:3,0] = current_state[12:15,0]
-        h_vec[3,0] = 0.
-        temp = tf_math.quaternion_multiply(orientation, h_vec)
-        result = tf_math.quaternion_multiply(temp, \
-                tf_math.quaternion_conjugate(orientation))
-        predicted_measurement[0:3,0] = result[0:3,0]
+        #h_vec = zeros((4,1))
+        #h_vec[0:3,0] = current_state[12:15,0]
+        #h_vec[3,0] = 0.
+        #temp = tf_math.quaternion_multiply(orientation, h_vec)
+        #result = tf_math.quaternion_multiply(temp, \
+        #        tf_math.quaternion_conjugate(orientation))
+        #predicted_measurement[0:3,0] = result[0:3,0]
         #Calculate the predicted gyro readings
-        temp_gyro = current_state[3:6,0] + current_state[9:12,0]
-        predicted_measurement[3:6,0] = temp_gyro
+        temp_gyro = current_state[3:6,0]
+        predicted_measurement[0:3,0] = temp_gyro
         #Calculate the predicted accelerometer readings
-        g_vec = zeros((4,1))
-        g_vec[0:3,0] = current_state[15:18,0]
-        g_vec[3,0] = 0.
-        temp = tf_math.quaternion_multiply(orientation, g_vec)
-        result = tf_math.quaternion_multiply(temp, \
-                tf_math.quaternion_conjugate(orientation))
-        temp_accel = current_state[6:9,0] + result[0:3,0]
-        predicted_measurement[6:9,0] = temp_accel
+        #g_vec = zeros((4,1))
+        #g_vec[0:3,0] = current_state[15:18,0]
+        #g_vec[3,0] = 0.
+        #temp = tf_math.quaternion_multiply(orientation, g_vec)
+        #result = tf_math.quaternion_multiply(temp, \
+        #        tf_math.quaternion_conjugate(orientation))
+        #temp_accel = current_state[6:9,0] + result[0:3,0]
+        #predicted_measurement[6:9,0] = temp_accel
         return predicted_measurement
 
     def estimate_mean(self, transformed_sigmas):
@@ -176,6 +193,7 @@ class SF9DOF_UKF:
             prod = dot(diff, diff.T)
             term = self.weight_covariance[i] * prod
             est_covariance += term
+        check_symmetry(est_covariance)
         return est_covariance
 
     def estimate_measurement_mean(self, measurement_sigmas):
@@ -193,6 +211,7 @@ class SF9DOF_UKF:
             prod = dot(diff, diff.T)
             term = self.weight_covariance[i] * prod
             est_measurement_covariance += term
+        check_symmetry(est_measurement_covariance)
         return est_measurement_covariance
 
     def cross_correlation_mat(self, est_mean, est_sigmas, meas_mean, meas_sigmas):
@@ -216,16 +235,16 @@ class SF9DOF_UKF:
 
     @staticmethod
     def stateMsgToMat(measurement_msg):
-        measurement = zeros((9,1))
-        measurement[0,0] = measurement_msg.magnetometer.x
-        measurement[1,0] = measurement_msg.magnetometer.y
-        measurement[2,0] = measurement_msg.magnetometer.z
-        measurement[3,0] = measurement_msg.angular_velocity.x
-        measurement[4,0] = measurement_msg.angular_velocity.y
-        measurement[5,0] = measurement_msg.angular_velocity.z
-        measurement[6,0] = measurement_msg.linear_acceleration.x
-        measurement[7,0] = measurement_msg.linear_acceleration.y
-        measurement[8,0] = measurement_msg.linear_acceleration.z
+        measurement = zeros((3,1))
+        #measurement[0,0] = measurement_msg.magnetometer.x
+        #measurement[1,0] = measurement_msg.magnetometer.y
+        #measurement[2,0] = measurement_msg.magnetometer.z
+        measurement[0,0] = measurement_msg.angular_velocity.x
+        measurement[1,0] = measurement_msg.angular_velocity.y
+        measurement[2,0] = measurement_msg.angular_velocity.z
+        #measurement[6,0] = measurement_msg.linear_acceleration.x
+        #measurement[7,0] = measurement_msg.linear_acceleration.y
+        #measurement[8,0] = measurement_msg.linear_acceleration.z
         return measurement
 
     def handle_measurement(self, measurement_msg):
@@ -264,6 +283,7 @@ class SF9DOF_UKF:
             temp = dot(kalman_gain, measurement_covariance)
             temp = dot(temp, kalman_gain.T)
             self.kalman_covariance = est_covariance - temp
+            check_symmetry(self.kalman_covariance)
             self.time = measurement_msg.header.stamp
             self.publish_imu()
             self.publish_raw_filter()
@@ -282,12 +302,14 @@ class SF9DOF_UKF:
         imu_msg.angular_velocity.z = self.kalman_state[5,0]
         imu_msg.angular_velocity_covariance = \
                 list(self.kalman_covariance[3:6,3:6].flatten())
-        imu_msg.linear_acceleration.x = self.kalman_state[6,0]
-        imu_msg.linear_acceleration.y = self.kalman_state[7,0]
-        imu_msg.linear_acceleration.z = self.kalman_state[8,0]
-        imu_msg.linear_acceleration_covariance = \
-               list(self.kalman_covariance[6:9,6:9].flatten())
+        #imu_msg.linear_acceleration.x = self.kalman_state[6,0]
+        #imu_msg.linear_acceleration.y = self.kalman_state[7,0]
+        #imu_msg.linear_acceleration.z = self.kalman_state[8,0]
+        #imu_msg.linear_acceleration_covariance = \
+        #       list(self.kalman_covariance[6:9,6:9].flatten())
         self.pub.publish(imu_msg)
+        rospy.loginfo("Orientation was %s",\
+                tf_math.euler_from_quaternion(SF9DOF_UKF.recover_quat(self.kalman_state).flatten()))
 
     def publish_raw_filter(self):
         filter_msg = RawFilter()
@@ -299,7 +321,12 @@ class SF9DOF_UKF:
     def generate_sigma_points(self, mean, covariance):
         sigmas = []
         sigmas.append(mean)
-        temp = numpy.linalg.cholesky(covariance)
+        if not check_symmetry(covariance):
+            pdb.set_trace()
+        temp = pos_sem_def_sqrt(covariance)
+        if any(isnan(temp)):
+            rospy.logerr("Sqrt matrix contained a NaN. Matrix was %s",
+                    covariance)
         temp = temp * sqrt(self.n + self.kf_lambda)
         for i in range(0,self.n):
             #Must use columns in order to get the write thing out of the
